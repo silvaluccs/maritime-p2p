@@ -1,0 +1,39 @@
+name: Elixir CI
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main", "develop" ]
+
+# 2. JOBS: Qual máquina vamos usar?
+jobs:
+  test:
+    runs-on: ubuntu-latest 
+
+    strategy:
+      matrix:
+        elixir: ['1.19.5']
+        otp: ['28.0']
+
+    steps:
+    - name: Fazer Checkout do código
+      uses: actions/checkout@v4
+
+    - name: Configurar Elixir
+      uses: erlef/setup-beam@v1
+      with:
+        elixir-version: ${{matrix.elixir}}
+        otp-version: ${{matrix.otp}}
+
+    - name: Instalar dependências
+      run: mix deps.get
+
+    - name: Compilar o código
+      run: mix compile --warnings-as-errors
+
+    - name: Checar formatação
+      run: mix format --check-formatted
+
+    - name: Rodar os testes
+      run: mix test
