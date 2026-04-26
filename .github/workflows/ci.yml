@@ -2,9 +2,9 @@ name: Elixir CI
 
 on:
   push:
-    branches: [ "main", "develop" ]
+    branches: [ "main", "develop", "feat/create-maritime-setor-node" ]
   pull_request:
-    branches: [ "main", "develop" ]
+    branches: [ "main", "develop", "feat/create-maritime-setor-node"]
 
 # 2. JOBS: Qual máquina vamos usar?
 jobs:
