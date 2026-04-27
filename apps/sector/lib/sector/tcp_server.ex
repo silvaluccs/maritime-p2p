@@ -18,7 +18,7 @@ defmodule Sector.TcpServer do
 
   @impl true
   def init(port) do
-    case(:gen_tcp.listen(port, [:binary, packet: :line, active: true])) do
+    case(:gen_tcp.listen(port, [:binary, packet: :line, active: true, reuseaddr: true])) do
       {:ok, socket} ->
         Logger.info("TCP server started on port #{port}")
 

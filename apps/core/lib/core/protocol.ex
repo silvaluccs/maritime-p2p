@@ -10,6 +10,7 @@ defmodule Core.Protocol do
     Estrutura de mensagem para comunicação entre setores e drones.
     """
 
+    @derive JSON.Encoder
     defstruct [:type, :from, :payload]
 
     @type t :: %__MODULE__{
