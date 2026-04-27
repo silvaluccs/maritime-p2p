@@ -34,16 +34,19 @@ defmodule Sector.TcpServer do
 
   @impl true
   def handle_info(:accept, state) do
-    case(:gen_tcp.accept(state.socket)) do
-      {:ok, client_socket} ->
-        Logger.info("Client connected: #{inspect(client_socket)}")
-        send(self(), :accept)
-        {:noreply, state}
+    Task.start_link(fn ->
+      case :gen_tcp.accept(state.socket) do
+        {:ok, client_socket} ->
+          Logger.info("Client connected")
+          :ok = :gen_tcp.controlling_process(client_socket, Process.whereis(__MODULE__))
+          send(Process.whereis(__MODULE__), :accept)
 
-      {:error, reason} ->
-        Logger.error("Failed to accept client connection: #{inspect(reason)}")
-        {:noreply, state}
-    end
+        {:error, _} ->
+          :ok
+      end
+    end)
+
+    {:noreply, state}
   end
 
   @impl true
