@@ -14,7 +14,6 @@ defmodule Sector.TcpIntegrationTest do
       port = 4001
       {:ok, _server_pid} = Sector.TcpServer.start_link(port)
 
-      # Conecta um cliente TCP "puro" 
       {:ok, socket} =
         :gen_tcp.connect(~c"127.0.0.1", port, [:binary, packet: :line, active: false])
 
