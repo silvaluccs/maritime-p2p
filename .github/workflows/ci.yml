@@ -2,9 +2,9 @@ name: Elixir CI
 
 on:
   push:
-    branches: [ "main", "develop" ]
+    branches: [ "main", "develop", "feat/create-maritime-setor-node" ]
   pull_request:
-    branches: [ "main", "develop" ]
+    branches: [ "main", "develop", "feat/create-maritime-setor-node"]
 
 # 2. JOBS: Qual máquina vamos usar?
 jobs:
@@ -34,6 +34,9 @@ jobs:
 
     - name: Checar formatação
       run: mix format --check-formatted
+
+    - name: Analisar codigo com Credo
+      run: mix credo --strict 
 
     - name: Rodar os testes
       run: mix test
