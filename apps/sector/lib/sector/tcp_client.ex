@@ -40,7 +40,7 @@ defmodule Sector.TcpClient do
 
   @impl true
   def handle_call({:broadcast, message}, _from, state) do
-    payload = message |> Jason.encode!() |> ensure_line()
+    payload = message |> JSON.encode!() |> ensure_line()
 
     results_sends =
       Enum.map(state.sockets, fn {address, socket} ->
@@ -57,7 +57,7 @@ defmodule Sector.TcpClient do
 
   @impl true
   def handle_call({:send_to, address, message}, _from, state) do
-    payload = message |> Jason.encode!() |> ensure_line()
+    payload = message |> JSON.encode!() |> ensure_line()
 
     case Map.fetch(state.sockets, address) do
       {:ok, socket} ->

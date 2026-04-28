@@ -10,15 +10,15 @@ defmodule Sector.TcpServer do
   use GenServer
   require Logger
 
-  alias Core.Protocol.Message
+  alias Core.Protocol.{Message, Reply, Request}
 
-  def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+  def start_link(port) when is_integer(port) do
+    GenServer.start_link(__MODULE__, port, name: __MODULE__)
   end
 
   @impl true
   def init(port) do
-    case(:gen_tcp.listen(port, [:binary, packet: :line, active: true, reuseaddr: true])) do
+    case(:gen_tcp.listen(port, [:binary, packet: :line, active: :once, reuseaddr: true])) do
       {:ok, socket} ->
         Logger.info("TCP server started on port #{port}")
 
@@ -55,25 +55,53 @@ defmodule Sector.TcpServer do
     |> String.trim()
     |> decode_and_handle(socket)
 
+    :inet.setopts(socket, active: :once)
+
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({:tcp_closed, _socket}, state) do
+    Logger.info("Conexão de um cliente fechada pelo outro lado.")
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({:tcp_error, _socket, reason}, state) do
+    Logger.error("Erro na conexão TCP do cliente: #{inspect(reason)}")
     {:noreply, state}
   end
 
   defp decode_and_handle(data, socket) do
     case JSON.decode(data) do
-      {:ok, map} -> handle_map(map, socket)
+      {:ok, map} -> dispatch_message(map, socket)
       {:error, reason} -> Logger.error("Failed to decode JSON: #{inspect(reason)}")
     end
   end
 
-  defp handle_map(map, socket) do
-    case Message.from_map(map) do
-      {:ok, %Message{type: type, from: from} = msg} ->
-        Logger.info("Received message type: #{inspect(type)} from: #{from}")
-        Task.start(fn -> handle_message(msg, socket) end)
-
-      {:error, :invalid_message} ->
-        Logger.error("Message has invalid format: #{inspect(map)}")
+  defp dispatch_message(%{"type" => "request"} = map, _socket) do
+    case Request.from_map(map) do
+      {:ok, request} -> Sector.Node.process_network_message(request)
+      {:error, reason} -> Logger.error("Request inválido: #{inspect(reason)}")
     end
+  end
+
+  defp dispatch_message(%{"type" => "reply"} = map, _socket) do
+    case Reply.from_map(map) do
+      {:ok, reply} -> Sector.Node.process_network_message(reply)
+      {:error, reason} -> Logger.error("Reply inválido: #{inspect(reason)}")
+    end
+  end
+
+  defp dispatch_message(%{"type" => type} = map, socket) when type in ["ping", "pong"] do
+    case Message.from_map(map) do
+      {:ok, msg} -> Task.start(fn -> handle_message(msg, socket) end)
+      {:error, _} -> Logger.error("Ping/Pong inválido: #{inspect(map)}")
+    end
+  end
+
+  defp dispatch_message(map, _socket) do
+    Logger.warning("Tipo de mensagem desconhecido: #{inspect(map)}")
   end
 
   defp handle_message(%Message{type: :ping, from: from}, socket) do
