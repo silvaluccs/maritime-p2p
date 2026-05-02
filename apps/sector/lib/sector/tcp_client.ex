@@ -120,6 +120,7 @@ defmodule Sector.TcpClient do
       {address, _socket} ->
         Logger.info("Conexão fechada: #{address}")
         new_state = remove_socket(socket, state)
+        Sector.Node.node_disconnected(address)
         {:noreply, schedule_reconnect(new_state, address)}
     end
   end
@@ -157,6 +158,7 @@ defmodule Sector.TcpClient do
          ) do
       {:ok, socket} ->
         Logger.info("Conectado a #{inspect(address)}")
+        Sector.Node.peer_connected(address)
 
         state
         |> Map.update!(:sockets, &Map.put(&1, address, socket))
