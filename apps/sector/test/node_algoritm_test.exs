@@ -65,7 +65,7 @@ defmodule Sector.NodeAlgoritmTest do
 
     # O Node A vai entrar na seção crítica (demora ~10s na SC no atual node.ex)
     # E quando sair, vai desengavetar nosso pedido e nos mandar o "Reply".
-    assert {:ok, reply_data} = :gen_tcp.recv(peer_server_socket, 0, 15000)
+    assert {:ok, reply_data} = :gen_tcp.recv(peer_server_socket, 0, 15_000)
 
     assert %{"type" => "reply", "from" => ^node_id} = JSON.decode!(String.trim(reply_data))
 
