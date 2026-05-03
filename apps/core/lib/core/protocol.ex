@@ -6,7 +6,7 @@ defmodule Core.Protocol do
 
   defmodule Request do
     @moduledoc """
-      Modulo para representar uma requisição de acesso à seção crítica. 
+      Modulo para representar uma requisição de acesso à seção crítica.
       Contém o tipo da mensagem, o remetente, o destinatário, o timestamp lógico e a prioridade da requisição.
     """
     @derive JSON.Encoder
@@ -42,7 +42,7 @@ defmodule Core.Protocol do
 
   defmodule Reply do
     @moduledoc """
-      Modulo para representar uma resposta a uma requisição de acesso à seção crítica. 
+      Modulo para representar uma resposta a uma requisição de acesso à seção crítica.
       Contém o tipo da mensagem, o remetente e o destinatário.
     """
     @derive JSON.Encoder
@@ -98,6 +98,30 @@ defmodule Core.Protocol do
          from: from,
          payload: payload
        }}
+    end
+
+    def from_map(_), do: {:error, :invalid_message}
+  end
+
+  defmodule DroneStatus do
+    @moduledoc "Mensagem enviada pelo drone para informar seu status aos setores."
+    @derive JSON.Encoder
+    defstruct [:type, :drone_id, :status]
+
+    def from_map(%{"type" => "drone_status", "drone_id" => drone_id, "status" => status}) do
+      {:ok, %__MODULE__{type: :drone_status, drone_id: drone_id, status: status}}
+    end
+
+    def from_map(_), do: {:error, :invalid_message}
+  end
+
+  defmodule Mission do
+    @moduledoc "Mensagem enviada por um setor para alocar um drone para uma missão."
+    @derive JSON.Encoder
+    defstruct [:type, :drone_id, :from]
+
+    def from_map(%{"type" => "mission", "drone_id" => drone_id, "from" => from}) do
+      {:ok, %__MODULE__{type: :mission, drone_id: drone_id, from: from}}
     end
 
     def from_map(_), do: {:error, :invalid_message}
