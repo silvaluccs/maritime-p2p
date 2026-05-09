@@ -1,6 +1,8 @@
 services:
   sector1:
-    build: .
+    build:
+      context: .
+      dockerfile: apps/sector/Dockerfile
     hostname: sector1
     stdin_open: true
     tty: true
@@ -18,7 +20,9 @@ services:
       - "5051:5050"
 
   sector2:
-    build: .
+    build:
+      context: .
+      dockerfile: apps/sector/Dockerfile
     hostname: sector2
     stdin_open: true
     tty: true
@@ -38,7 +42,9 @@ services:
       - sector1
 
   sector3:
-    build: .
+    build:
+      context: .
+      dockerfile: apps/sector/Dockerfile
     hostname: sector3
     stdin_open: true
     tty: true
@@ -59,7 +65,9 @@ services:
       - sector2
 
   drone1:
-    build: .
+    build:
+      context: .
+      dockerfile: apps/drone/Dockerfile
     hostname: drone1
     environment:
       - DRONE_ID=drone_alpha
@@ -71,7 +79,9 @@ services:
       - sector3
 
   drone2:
-    build: .
+    build:
+      context: .
+      dockerfile: apps/drone/Dockerfile
     hostname: drone2
     environment:
       - DRONE_ID=drone_beta
@@ -83,7 +93,9 @@ services:
       - sector3
 
   sensor1:
-    build: .
+    build:
+      context: .
+      dockerfile: apps/sensors/Dockerfile
     hostname: sensor1
     environment:
       - HOST=sector1:5050
@@ -92,7 +104,9 @@ services:
       - sector1
 
   sensor2:
-    build: .
+    build:
+      context: .
+      dockerfile: apps/sensors/Dockerfile
     hostname: sensor2
     environment:
       - HOST=sector2:5050
@@ -101,7 +115,9 @@ services:
       - sector2
 
   sensor3:
-    build: .
+    build:
+      context: .
+      dockerfile: apps/sensors/Dockerfile
     hostname: sensor3
     environment:
       - HOST=sector3:5050
