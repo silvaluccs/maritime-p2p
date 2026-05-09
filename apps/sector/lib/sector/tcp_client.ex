@@ -5,6 +5,8 @@ defmodule Sector.TcpClient do
   use GenServer
   require Logger
 
+  alias Core.Env
+
   @reconnect_ms 5_000
 
   def start_link(args \\ []) do
@@ -25,7 +27,7 @@ defmodule Sector.TcpClient do
 
   @impl true
   def init(_opts) do
-    hosts = get_hosts_from_env()
+    hosts = Env.get_hosts_from_env("HOSTS")
 
     state = %{
       reconnect_timer: @reconnect_ms,
@@ -98,6 +100,14 @@ defmodule Sector.TcpClient do
     else
       {:noreply, connect(address, host, port, state)}
     end
+  end
+
+  @impl true
+  def handle_info({:tcp, socket, _data}, state) do
+    # O cliente TCP dos setores não precisa processar mensagens recebidas,
+    # as mensagens entre setores são tratadas pelo TcpServer.
+    :inet.setopts(socket, active: :once)
+    {:noreply, state}
   end
 
   @impl true
@@ -184,42 +194,7 @@ defmodule Sector.TcpClient do
     |> Enum.find(fn {_address, s} -> s == socket end)
   end
 
-  defp get_hosts_from_env do
-    get_hosts()
-    |> Enum.map(&parse_host/1)
-    |> Enum.map(fn
-      {:ok, host} -> host
-      {:error, _} -> nil
-    end)
-    |> Enum.reject(&is_nil/1)
-  end
-
   defp ensure_line(message) do
     if String.ends_with?(message, "\n"), do: message, else: message <> "\n"
-  end
-
-  defp get_hosts do
-    System.get_env("HOSTS", "")
-    |> String.split(",", trim: true)
-    |> Enum.map(&String.trim/1)
-    |> Enum.reject(&(&1 == ""))
-  end
-
-  defp parse_host(host) do
-    case String.split(host, ":") do
-      [ip, port_str] ->
-        case Integer.parse(port_str) do
-          {port, ""} when port in 1..65_535 ->
-            {:ok, {ip, port}}
-
-          _ ->
-            Logger.warning("Porta inválida ignorada: #{host}")
-            {:error, :invalid_port}
-        end
-
-      _ ->
-        Logger.warning("Formato de host inválido ignorado: #{host}")
-        {:error, :invalid_host_format}
-    end
   end
 end

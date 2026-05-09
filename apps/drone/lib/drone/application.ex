@@ -1,4 +1,4 @@
-defmodule Sector.Application do
+defmodule Drone.Application do
   # See https://hexdocs.pm/elixir/Application.html
   # for more information on OTP Applications
   @moduledoc false
@@ -7,19 +7,19 @@ defmodule Sector.Application do
 
   @impl true
   def start(_type, _args) do
-    port = String.to_integer(System.get_env("TCP_PORT") || "5050")
+    drone_id = UUIDv7.generate()
 
     children =
       if Mix.env() == :test do
-        [Sector.NodeId]
+        []
       else
         [
-          Sector.NodeId,
-          {Sector.Node, [tcp_port: port]}
+          Drone.TcpClient,
+          {Drone.Worker, [drone_id: drone_id]}
         ]
       end
 
-    opts = [strategy: :one_for_one, name: Sector.Supervisor]
+    opts = [strategy: :one_for_one, name: Drone.Supervisor]
     Supervisor.start_link(children, opts)
   end
 end

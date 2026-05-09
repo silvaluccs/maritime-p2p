@@ -1,7 +1,7 @@
 defmodule Sector.Node do
   @moduledoc false
 
-  alias Core.Protocol.{Reply, Request}
+  alias Core.Protocol.{MissionAck, MissionReject, Reply, Request}
 
   require Logger
   use GenServer
@@ -34,10 +34,25 @@ defmodule Sector.Node do
     GenServer.cast(__MODULE__, {:peer_connected, address})
   end
 
+  @doc """
+  Notifica o Node que um drone desconectou (fechou conexão TCP).
+  Se ele estava em missão, deve ser reenfileirado com prioridade 2.
+  """
+  def drone_disconnected(drone_id) do
+    GenServer.cast(__MODULE__, {:drone_disconnected, drone_id})
+  end
+
+  def request_mission do
+    send(Process.whereis(__MODULE__), :try_critical_section)
+  end
+
+  def get_queue do
+    GenServer.call(__MODULE__, :get_queue)
+  end
+
   @impl true
   def init(opts) do
-    # node_id = Sector.NodeId.get()
-    node_id = "127.0.0.1:#{opts[:tcp_port]}"
+    node_id = "#{System.get_env("NODE_NAME") || "127.0.0.1"}:#{opts[:tcp_port]}"
 
     children = [
       {Sector.TcpServer, opts[:tcp_port]},
@@ -56,13 +71,21 @@ defmodule Sector.Node do
       request_for_process: nil,
       awaiting_replies: MapSet.new(),
       deferred_replies: MapSet.new(),
-      drones_doing_mission: MapSet.new(),
+      drones_doing_mission: %{},
+      available_drones: MapSet.new(),
+      waiting_for_drone?: false,
       request_queue: [],
       request_counter: 0,
-      cs_heartbeat_timer: nil
+      cs_heartbeat_timer: nil,
+      pending_mission_ack: nil
     }
 
     {:ok, state}
+  end
+
+  @impl true
+  def handle_call(:get_queue, _from, state) do
+    {:reply, state.request_queue, state}
   end
 
   @impl true
@@ -70,7 +93,6 @@ defmodule Sector.Node do
     Logger.info("Peer #{address} desconectou. Reavaliando seção crítica...")
 
     if state.requesting? and not state.in_critical_section? do
-      # Remove o peer morto do conjunto de espera
       new_awaiting = MapSet.delete(state.awaiting_replies, address)
       state = %{state | awaiting_replies: new_awaiting}
 
@@ -111,14 +133,127 @@ defmodule Sector.Node do
   end
 
   @impl true
+  def handle_cast({:drone_disconnected, drone_id}, state) do
+    Logger.warning("Drone #{drone_id} desconectou!")
+
+    new_available = MapSet.delete(state.available_drones, drone_id)
+    {mission_name, new_doing} = Map.pop(state.drones_doing_mission, drone_id)
+
+    state = %{state | available_drones: new_available, drones_doing_mission: new_doing}
+
+    state =
+      if mission_name do
+        Logger.warning(
+          "Drone #{drone_id} caiu durante a missão #{mission_name}. Re-enfileirando com prioridade 2!"
+        )
+
+        new_clock = state.clock + 1
+        requeued = {2, mission_name, new_clock, :waiting}
+        new_queue = insert_request_in_queue(state.request_queue, requeued)
+
+        %{state | request_queue: new_queue, clock: new_clock}
+      else
+        state
+      end
+
+    {:noreply, maybe_start_request(state)}
+  end
+
+  @impl true
+  def handle_cast({:network_message, %Core.Protocol.DroneStatus{} = status}, state) do
+    Logger.info("Recebido status do drone #{status.drone_id}: #{status.status}")
+
+    {new_available, new_doing} =
+      if status.status == "IDLE" do
+        {
+          MapSet.put(state.available_drones, status.drone_id),
+          Map.delete(state.drones_doing_mission, status.drone_id)
+        }
+      else
+        {
+          MapSet.delete(state.available_drones, status.drone_id),
+          state.drones_doing_mission
+        }
+      end
+
+    new_state = %{state | available_drones: new_available, drones_doing_mission: new_doing}
+
+    if new_state.in_critical_section? and new_state.waiting_for_drone? and status.status == "IDLE" do
+      allocate_drone(new_state)
+    else
+      {:noreply, new_state}
+    end
+  end
+
+  @impl true
+  def handle_cast({:network_message, %MissionAck{} = ack}, state) do
+    case state.pending_mission_ack do
+      nil ->
+        Logger.warning(
+          "[CS] MissionAck recebido de #{ack.drone_id} mas não havia missão pendente. Ignorando."
+        )
+
+        {:noreply, state}
+
+      {mission_name, _original_clock} ->
+        IO.puts(
+          "\n=== [SHELL] [CS] ✅ MissionAck recebido do drone #{ack.drone_id} para '#{mission_name}'. Saindo da seção crítica. ==="
+        )
+
+        Logger.info(
+          "[CS] MissionAck do drone #{ack.drone_id} para '#{mission_name}'. Saindo da CS."
+        )
+
+        send(self(), :exit_critical_section)
+        {:noreply, %{state | pending_mission_ack: nil}}
+    end
+  end
+
+  @impl true
+  def handle_cast({:network_message, %MissionReject{} = rej}, state) do
+    case state.pending_mission_ack do
+      nil ->
+        Logger.warning(
+          "[CS] MissionReject recebido de #{rej.drone_id} mas não havia missão pendente. Ignorando."
+        )
+
+        {:noreply, state}
+
+      {mission_name, original_clock} ->
+        IO.puts(
+          "\n=== [SHELL] [CS] ⚠️  MissionReject do drone #{rej.drone_id}! Re-enfileirando '#{mission_name}' com PRIORIDADE 2, clock original #{original_clock}. ==="
+        )
+
+        Logger.warning(
+          "[CS] MissionReject do drone #{rej.drone_id}. Re-enfileirando '#{mission_name}' (clock=#{original_clock}) com prioridade 2."
+        )
+
+        # Re-insere com prioridade 2 e clock ORIGINAL
+        requeued = {2, mission_name, original_clock, :waiting}
+        new_queue = insert_request_in_queue(state.request_queue, requeued)
+
+        new_state = %{state | pending_mission_ack: nil, request_queue: new_queue}
+
+        send(self(), :exit_critical_section)
+        {:noreply, new_state}
+    end
+  end
+
+  @impl true
   def handle_cast({:network_message, %Request{} = req}, state) do
     Logger.info("Recebido Request de #{req.from} com clock #{req.clock}")
+
+    IO.puts(
+      "=== [SHELL] [REDE] Recebido Request de #{req.from} (Clock: #{req.clock}, Prio: #{req.priority}) ==="
+    )
+
     handle_request(req.from, req.clock, req.priority, state)
   end
 
   @impl true
   def handle_cast({:network_message, %Reply{} = reply}, state) do
     Logger.info("Recebido Reply de #{reply.from}")
+    IO.puts("=== [SHELL] [REDE] Recebido Reply de #{reply.from} ===")
     handle_reply(reply.from, state)
   end
 
@@ -134,6 +269,7 @@ defmodule Sector.Node do
         "#{name} PRIORIDADE #{p} TS #{ts}"
       end)
 
+    IO.puts("\n=== [SHELL] Nova missão enfileirada. FILA=\n#{queue_format} ===")
     Logger.info("Nova missão enfileirada. FILA=\n#{queue_format}")
 
     new_state = %{
@@ -171,7 +307,9 @@ defmodule Sector.Node do
 
   @impl true
   def handle_info(:exit_critical_section, state) do
-    Logger.info("Saindo da seção crítica")
+    IO.puts(
+      "\n===========================================\n[SHELL] => REQUEST CONCLUÍDO COM SUCESSO! <=\n===========================================\n"
+    )
 
     queue_format =
       Enum.map_join(state.request_queue, "\n", fn {p, name, ts, _status} ->
@@ -188,6 +326,7 @@ defmodule Sector.Node do
         clock: state.clock
       }
 
+      IO.puts("=== [SHELL] Enviando REPLY (adiado) para #{deferred_node} ===")
       Sector.TcpClient.send_to(deferred_node, reply_msg)
     end)
 
@@ -198,7 +337,8 @@ defmodule Sector.Node do
         request_ts: nil,
         request_priority: 0,
         awaiting_replies: MapSet.new(),
-        deferred_replies: MapSet.new()
+        deferred_replies: MapSet.new(),
+        pending_mission_ack: nil
     }
 
     new_state = maybe_start_request(new_state)
@@ -220,6 +360,10 @@ defmodule Sector.Node do
         clock: network_clock,
         priority: priority
       }
+
+      IO.puts(
+        "\n=== [SHELL] Enviando REQUEST (Clock: #{network_clock}, Prioridade: #{priority}) para os outros setores... ==="
+      )
 
       Sector.TcpClient.broadcast(request_msg)
 
@@ -301,6 +445,8 @@ defmodule Sector.Node do
             " Meu clock: #{state.clock} | TS do request: #{request_ts}"
         )
 
+        IO.puts("=== [SHELL] [ALGORITMO] ADIANDO reply para #{from_id} (Na Seção Crítica) ===")
+
         {:noreply,
          %{state | deferred_replies: MapSet.put(state.deferred_replies, {from_id, request_ts})}}
 
@@ -308,6 +454,10 @@ defmodule Sector.Node do
         Logger.info(
           "[REQUEST] ACEITANDO request de #{from_id} — não estou requisitando." <>
             " Meu clock: #{state.clock} | TS do request: #{request_ts}"
+        )
+
+        IO.puts(
+          "=== [SHELL] [ALGORITMO] ACEITANDO request de #{from_id} (Não estou requisitando) -> Enviando REPLY ==="
         )
 
         reply_msg = %Reply{
@@ -334,6 +484,8 @@ defmodule Sector.Node do
             " | TS do request: #{request_ts} prioridade #{request_priority}"
         )
 
+        IO.puts("=== [SHELL] [ALGORITMO] ADIANDO reply para #{from_id} (Tenho prioridade) ===")
+
         {:noreply,
          %{state | deferred_replies: MapSet.put(state.deferred_replies, {from_id, request_ts})}}
 
@@ -342,6 +494,10 @@ defmodule Sector.Node do
           "[REQUEST] ACEITANDO request de #{from_id} — ele tem prioridade." <>
             " Meu TS: #{state.request_ts} prioridade #{state.request_priority}" <>
             " | TS do request: #{request_ts} prioridade #{request_priority}"
+        )
+
+        IO.puts(
+          "=== [SHELL] [ALGORITMO] ACEITANDO request de #{from_id} (Ele tem prioridade) -> Enviando REPLY ==="
         )
 
         reply_msg = %Reply{
@@ -360,7 +516,6 @@ defmodule Sector.Node do
     cond do
       my_ts < other_ts -> true
       my_ts > other_ts -> false
-      # Desempate final: node_id garante ordem total — menor ID vence (entra primeiro na CS)
       my_id < other_id -> true
       true -> false
     end
@@ -373,6 +528,10 @@ defmodule Sector.Node do
 
       Logger.info(
         "[REPLY] Recebido de #{from_id}. Aguardando ainda: #{inspect(MapSet.to_list(new_awaiting))}"
+      )
+
+      IO.puts(
+        "=== [SHELL] [ALGORITMO] Faltam respostas de: #{inspect(MapSet.to_list(new_awaiting))} ==="
       )
 
       if MapSet.size(new_awaiting) == 0 do
@@ -393,8 +552,63 @@ defmodule Sector.Node do
     if state.cs_heartbeat_timer, do: Process.cancel_timer(state.cs_heartbeat_timer)
 
     Logger.info("[CS] Entrando na seção crítica.")
-    Process.send_after(self(), :exit_critical_section, 10_000)
+    IO.puts("=== [SHELL] [CS] Todas as permissões concedidas! Entrando na Seção Crítica. ===")
     timer = Process.send_after(self(), :log_critical_section, 1_000)
-    %{state | in_critical_section?: true, cs_heartbeat_timer: timer}
+
+    state = %{
+      state
+      | in_critical_section?: true,
+        cs_heartbeat_timer: timer,
+        waiting_for_drone?: true
+    }
+
+    # Tenta alocar um drone assim que entra na seção crítica
+    {_noreply, state} = allocate_drone(state)
+    state
+  end
+
+  defp allocate_drone(state) do
+    if state.waiting_for_drone? do
+      if MapSet.size(state.available_drones) > 0 do
+        drone_id = Enum.random(MapSet.to_list(state.available_drones))
+
+        IO.puts(
+          "\n=== [SHELL] [CS] Alocando drone #{drone_id} para a missão #{state.request_for_process}. ==="
+        )
+
+        Logger.info("[CS] Alocando drone #{drone_id} para a missão #{state.request_for_process}.")
+
+        mission_msg = %Core.Protocol.Mission{
+          type: :mission,
+          drone_id: drone_id,
+          from: state.node_id,
+          mission_name: state.request_for_process,
+          clock: state.request_ts
+        }
+
+        encoded = JSON.encode!(mission_msg) <> "\n"
+        Sector.TcpServer.broadcast(encoded)
+
+        new_doing = Map.put(state.drones_doing_mission, drone_id, state.request_for_process)
+
+        state = %{
+          state
+          | waiting_for_drone?: false,
+            available_drones: MapSet.delete(state.available_drones, drone_id),
+            drones_doing_mission: new_doing,
+            pending_mission_ack: {state.request_for_process, state.request_ts}
+        }
+
+        IO.puts("=== [SHELL] [CS] Aguardando ACK/REJECT do drone #{drone_id}... ===")
+        Logger.info("[CS] Missão enviada para #{drone_id}. Aguardando MissionAck/MissionReject.")
+
+        {:noreply, state}
+      else
+        Logger.info("[CS] Aguardando um drone ficar disponível...")
+        {:noreply, state}
+      end
+    else
+      {:noreply, state}
+    end
   end
 end

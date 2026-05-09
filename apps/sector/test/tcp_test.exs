@@ -5,6 +5,10 @@ defmodule Sector.TcpIntegrationTest do
     if pid = Process.whereis(Sector.TcpServer), do: GenServer.stop(pid)
     if pid = Process.whereis(Sector.TcpClient), do: GenServer.stop(pid)
 
+    unless Process.whereis(Sector.NodeId) do
+      Sector.NodeId.start_link([])
+    end
+
     System.delete_env("HOSTS")
     :ok
   end
@@ -67,7 +71,7 @@ defmodule Sector.TcpIntegrationTest do
     end
 
     test "testa a funcionalidade send_to/2 e broadcast/1" do
-      port1 = 4004
+      port1 = 4005
       # Iniciamos um servidor falso para apenas escutar o que o cliente manda
       {:ok, listen_socket} = :gen_tcp.listen(port1, [:binary, packet: :line, active: false])
 

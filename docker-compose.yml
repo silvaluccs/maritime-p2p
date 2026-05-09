@@ -1,0 +1,83 @@
+services:
+  sector1:
+    build: .
+    hostname: sector1
+    stdin_open: true
+    tty: true
+    environment:
+      - NODE_NAME=sector1
+      - TCP_PORT=5050
+      - HOSTS=sector2:5050,sector3:5050
+    command:
+      [
+        "sh",
+        "-c",
+        "cd apps/sector && mix run -e 'Sector.Shell.start()' --no-halt",
+      ]
+    ports:
+      - "5051:5050"
+
+  sector2:
+    build: .
+    hostname: sector2
+    stdin_open: true
+    tty: true
+    environment:
+      - NODE_NAME=sector2
+      - TCP_PORT=5050
+      - HOSTS=sector1:5050,sector3:5050
+    command:
+      [
+        "sh",
+        "-c",
+        "cd apps/sector && mix run -e 'Sector.Shell.start()' --no-halt",
+      ]
+    ports:
+      - "5052:5050"
+    depends_on:
+      - sector1
+
+  sector3:
+    build: .
+    hostname: sector3
+    stdin_open: true
+    tty: true
+    environment:
+      - NODE_NAME=sector3
+      - TCP_PORT=5050
+      - HOSTS=sector1:5050,sector2:5050
+    command:
+      [
+        "sh",
+        "-c",
+        "cd apps/sector && mix run -e 'Sector.Shell.start()' --no-halt",
+      ]
+    ports:
+      - "5053:5050"
+    depends_on:
+      - sector1
+      - sector2
+
+  drone1:
+    build: .
+    hostname: drone1
+    environment:
+      - DRONE_ID=drone_alpha
+      - TCP_PEERS=sector1:5050,sector2:5050,sector3:5050
+    command: ["sh", "-c", "cd apps/drone && mix run --no-halt"]
+    depends_on:
+      - sector1
+      - sector2
+      - sector3
+
+  drone2:
+    build: .
+    hostname: drone2
+    environment:
+      - DRONE_ID=drone_beta
+      - TCP_PEERS=sector1:5050,sector2:5050,sector3:5050
+    command: ["sh", "-c", "cd apps/drone && mix run --no-halt"]
+    depends_on:
+      - sector1
+      - sector2
+      - sector3

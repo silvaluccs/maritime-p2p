@@ -10,10 +10,14 @@ defmodule Sector.TcpServer do
   use GenServer
   require Logger
 
-  alias Core.Protocol.{Message, Reply, Request}
+  alias Core.Protocol.{DroneStatus, Message, MissionAck, MissionReject, Reply, Request}
 
   def start_link(port) when is_integer(port) do
     GenServer.start_link(__MODULE__, port, name: __MODULE__)
+  end
+
+  def broadcast(message) do
+    GenServer.cast(__MODULE__, {:broadcast, message})
   end
 
   @impl true
@@ -24,7 +28,7 @@ defmodule Sector.TcpServer do
 
         send(self(), :accept)
 
-        {:ok, %{socket: socket}}
+        {:ok, %{socket: socket, clients: [], drone_sockets: %{}}}
 
       {:error, reason} ->
         Logger.error("Failed to start TCP server: #{inspect(reason)}")
@@ -37,8 +41,8 @@ defmodule Sector.TcpServer do
     Task.start_link(fn ->
       case :gen_tcp.accept(state.socket) do
         {:ok, client_socket} ->
-          Logger.info("Client connected")
           :ok = :gen_tcp.controlling_process(client_socket, Process.whereis(__MODULE__))
+          send(Process.whereis(__MODULE__), {:new_client, client_socket})
           send(Process.whereis(__MODULE__), :accept)
 
         {:error, _} ->
@@ -50,33 +54,71 @@ defmodule Sector.TcpServer do
   end
 
   @impl true
+  def handle_info({:new_client, client_socket}, state) do
+    Logger.info("Client connected")
+    {:noreply, %{state | clients: [client_socket | state.clients]}}
+  end
+
+  @impl true
   def handle_info({:tcp, socket, data}, state) do
-    data
-    |> String.trim()
-    |> decode_and_handle(socket)
+    trimmed_data = String.trim(data)
+
+    new_state =
+      case JSON.decode(trimmed_data) do
+        {:ok, map} ->
+          state =
+            if map["type"] == "drone_status" do
+              %{state | drone_sockets: Map.put(state.drone_sockets, socket, map["drone_id"])}
+            else
+              state
+            end
+
+          dispatch_message(map, socket)
+          state
+
+        {:error, reason} ->
+          Logger.error("Failed to decode JSON: #{inspect(reason)}")
+          state
+      end
 
     :inet.setopts(socket, active: :once)
 
-    {:noreply, state}
+    {:noreply, new_state}
   end
 
   @impl true
-  def handle_info({:tcp_closed, _socket}, state) do
+  def handle_info({:tcp_closed, socket}, state) do
     Logger.info("Conexão de um cliente fechada pelo outro lado.")
-    {:noreply, state}
+    new_clients = List.delete(state.clients, socket)
+    {drone_id, new_drone_sockets} = Map.pop(state.drone_sockets, socket)
+
+    if drone_id do
+      Sector.Node.drone_disconnected(drone_id)
+    end
+
+    {:noreply, %{state | clients: new_clients, drone_sockets: new_drone_sockets}}
   end
 
   @impl true
-  def handle_info({:tcp_error, _socket, reason}, state) do
+  def handle_info({:tcp_error, socket, reason}, state) do
     Logger.error("Erro na conexão TCP do cliente: #{inspect(reason)}")
-    {:noreply, state}
+    new_clients = List.delete(state.clients, socket)
+    {drone_id, new_drone_sockets} = Map.pop(state.drone_sockets, socket)
+
+    if drone_id do
+      Sector.Node.drone_disconnected(drone_id)
+    end
+
+    {:noreply, %{state | clients: new_clients, drone_sockets: new_drone_sockets}}
   end
 
-  defp decode_and_handle(data, socket) do
-    case JSON.decode(data) do
-      {:ok, map} -> dispatch_message(map, socket)
-      {:error, reason} -> Logger.error("Failed to decode JSON: #{inspect(reason)}")
-    end
+  @impl true
+  def handle_cast({:broadcast, message}, state) do
+    Enum.each(state.clients, fn socket ->
+      :gen_tcp.send(socket, message)
+    end)
+
+    {:noreply, state}
   end
 
   defp dispatch_message(%{"type" => "request"} = map, _socket) do
@@ -90,6 +132,27 @@ defmodule Sector.TcpServer do
     case Reply.from_map(map) do
       {:ok, reply} -> Sector.Node.process_network_message(reply)
       {:error, reason} -> Logger.error("Reply inválido: #{inspect(reason)}")
+    end
+  end
+
+  defp dispatch_message(%{"type" => "drone_status"} = map, _socket) do
+    case DroneStatus.from_map(map) do
+      {:ok, status} -> Sector.Node.process_network_message(status)
+      {:error, reason} -> Logger.error("DroneStatus inválido: #{inspect(reason)}")
+    end
+  end
+
+  defp dispatch_message(%{"type" => "mission_ack"} = map, _socket) do
+    case MissionAck.from_map(map) do
+      {:ok, ack} -> Sector.Node.process_network_message(ack)
+      {:error, reason} -> Logger.error("MissionAck inválido: #{inspect(reason)}")
+    end
+  end
+
+  defp dispatch_message(%{"type" => "mission_reject"} = map, _socket) do
+    case MissionReject.from_map(map) do
+      {:ok, reject} -> Sector.Node.process_network_message(reject)
+      {:error, reason} -> Logger.error("MissionReject inválido: #{inspect(reason)}")
     end
   end
 
