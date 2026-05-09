@@ -73,7 +73,8 @@ defmodule Sector.TcpIntegrationTest do
     test "testa a funcionalidade send_to/2 e broadcast/1" do
       port1 = 4005
       # Iniciamos um servidor falso para apenas escutar o que o cliente manda
-      {:ok, listen_socket} = :gen_tcp.listen(port1, [:binary, packet: :line, active: false])
+      {:ok, listen_socket} =
+        :gen_tcp.listen(port1, [:binary, packet: :line, active: false, reuseaddr: true])
 
       System.put_env("HOSTS", "127.0.0.1:#{port1}")
       {:ok, _client_pid} = Sector.TcpClient.start_link()

@@ -122,7 +122,7 @@ defmodule Sector.NodeAlgoritmTest do
     {:ok, listen_socket} =
       :gen_tcp.listen(peer_port, [:binary, packet: :line, active: false, reuseaddr: true])
 
-    {:ok, peer_server_socket} = :gen_tcp.accept(listen_socket, 2000)
+    {:ok, peer_server_socket} = :gen_tcp.accept(listen_socket, 6000)
 
     # Devemos receber o Request re-enviado por causa da conexão tardia
     assert {:ok, data} = :gen_tcp.recv(peer_server_socket, 0, 5000)

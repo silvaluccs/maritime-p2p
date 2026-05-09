@@ -81,3 +81,30 @@ services:
       - sector1
       - sector2
       - sector3
+
+  sensor1:
+    build: .
+    hostname: sensor1
+    environment:
+      - HOST=sector1:5050
+    command: ["sh", "-c", "cd apps/sensors && mix run --no-halt"]
+    depends_on:
+      - sector1
+
+  sensor2:
+    build: .
+    hostname: sensor2
+    environment:
+      - HOST=sector2:5050
+    command: ["sh", "-c", "cd apps/sensors && mix run --no-halt"]
+    depends_on:
+      - sector2
+
+  sensor3:
+    build: .
+    hostname: sensor3
+    environment:
+      - HOST=sector3:5050
+    command: ["sh", "-c", "cd apps/sensors && mix run --no-halt"]
+    depends_on:
+      - sector3

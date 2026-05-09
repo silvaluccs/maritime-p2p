@@ -1,0 +1,42 @@
+name: Docker Compose CI
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  test-docker-compose:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check out the codebase
+      uses: actions/checkout@v4
+
+    - name: Build docker images
+      run: docker compose build
+
+    - name: Start docker compose services
+      run: docker compose up -d
+
+    - name: Wait for services to initialize
+      run: sleep 20
+
+    - name: Check running containers
+      run: docker compose ps
+
+    - name: Verify no containers have exited unexpectedly
+      run: |
+        # Pega a lista de containers que pararam/falharam
+        EXITED=$(docker compose ps --filter "status=exited" --format json)
+        if [ "$EXITED" != "" ] && [ "$EXITED" != "[]" ]; then
+          echo "Alguns containers falharam e saíram inesperadamente:"
+          docker compose ps --filter "status=exited"
+          exit 1
+        fi
+        echo "Todos os containers estão rodando perfeitamente."
+
+    - name: Print container logs (for debugging)
+      if: always()
+      run: docker compose logs

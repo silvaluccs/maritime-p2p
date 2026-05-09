@@ -10,7 +10,16 @@ defmodule Sector.TcpServer do
   use GenServer
   require Logger
 
-  alias Core.Protocol.{DroneStatus, Message, MissionAck, MissionReject, Reply, Request}
+  alias Core.Protocol.{
+    DroneStatus,
+    Message,
+    MissionAck,
+    MissionReject,
+    Reply,
+    Request,
+    SensorRequest,
+    SensorStatus
+  }
 
   def start_link(port) when is_integer(port) do
     GenServer.start_link(__MODULE__, port, name: __MODULE__)
@@ -28,7 +37,7 @@ defmodule Sector.TcpServer do
 
         send(self(), :accept)
 
-        {:ok, %{socket: socket, clients: [], drone_sockets: %{}}}
+        {:ok, %{socket: socket, clients: [], drone_sockets: %{}, sensor_sockets: %{}}}
 
       {:error, reason} ->
         Logger.error("Failed to start TCP server: #{inspect(reason)}")
@@ -67,10 +76,15 @@ defmodule Sector.TcpServer do
       case JSON.decode(trimmed_data) do
         {:ok, map} ->
           state =
-            if map["type"] == "drone_status" do
-              %{state | drone_sockets: Map.put(state.drone_sockets, socket, map["drone_id"])}
-            else
-              state
+            cond do
+              map["type"] == "drone_status" ->
+                %{state | drone_sockets: Map.put(state.drone_sockets, socket, map["drone_id"])}
+
+              map["type"] == "sensor_status" ->
+                %{state | sensor_sockets: Map.put(state.sensor_sockets, socket, map["sensor_id"])}
+
+              true ->
+                state
             end
 
           dispatch_message(map, socket)
@@ -91,12 +105,23 @@ defmodule Sector.TcpServer do
     Logger.info("Conexão de um cliente fechada pelo outro lado.")
     new_clients = List.delete(state.clients, socket)
     {drone_id, new_drone_sockets} = Map.pop(state.drone_sockets, socket)
+    {sensor_id, new_sensor_sockets} = Map.pop(state.sensor_sockets, socket)
 
     if drone_id do
       Sector.Node.drone_disconnected(drone_id)
     end
 
-    {:noreply, %{state | clients: new_clients, drone_sockets: new_drone_sockets}}
+    if sensor_id do
+      Sector.Node.sensor_disconnected(sensor_id)
+    end
+
+    {:noreply,
+     %{
+       state
+       | clients: new_clients,
+         drone_sockets: new_drone_sockets,
+         sensor_sockets: new_sensor_sockets
+     }}
   end
 
   @impl true
@@ -104,12 +129,23 @@ defmodule Sector.TcpServer do
     Logger.error("Erro na conexão TCP do cliente: #{inspect(reason)}")
     new_clients = List.delete(state.clients, socket)
     {drone_id, new_drone_sockets} = Map.pop(state.drone_sockets, socket)
+    {sensor_id, new_sensor_sockets} = Map.pop(state.sensor_sockets, socket)
 
     if drone_id do
       Sector.Node.drone_disconnected(drone_id)
     end
 
-    {:noreply, %{state | clients: new_clients, drone_sockets: new_drone_sockets}}
+    if sensor_id do
+      Sector.Node.sensor_disconnected(sensor_id)
+    end
+
+    {:noreply,
+     %{
+       state
+       | clients: new_clients,
+         drone_sockets: new_drone_sockets,
+         sensor_sockets: new_sensor_sockets
+     }}
   end
 
   @impl true
@@ -153,6 +189,20 @@ defmodule Sector.TcpServer do
     case MissionReject.from_map(map) do
       {:ok, reject} -> Sector.Node.process_network_message(reject)
       {:error, reason} -> Logger.error("MissionReject inválido: #{inspect(reason)}")
+    end
+  end
+
+  defp dispatch_message(%{"type" => "sensor_status"} = map, _socket) do
+    case SensorStatus.from_map(map) do
+      {:ok, status} -> Sector.Node.process_network_message(status)
+      {:error, reason} -> Logger.error("SensorStatus inválido: #{inspect(reason)}")
+    end
+  end
+
+  defp dispatch_message(%{"type" => "sensor_request"} = map, _socket) do
+    case SensorRequest.from_map(map) do
+      {:ok, request} -> Sector.Node.process_network_message(request)
+      {:error, reason} -> Logger.error("SensorRequest inválido: #{inspect(reason)}")
     end
   end
 

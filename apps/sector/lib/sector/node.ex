@@ -1,7 +1,7 @@
 defmodule Sector.Node do
   @moduledoc false
 
-  alias Core.Protocol.{MissionAck, MissionReject, Reply, Request}
+  alias Core.Protocol.{MissionAck, MissionReject, Reply, Request, SensorRequest, SensorStatus}
 
   require Logger
   use GenServer
@@ -42,6 +42,13 @@ defmodule Sector.Node do
     GenServer.cast(__MODULE__, {:drone_disconnected, drone_id})
   end
 
+  @doc """
+  Notifica o Node que um sensor desconectou.
+  """
+  def sensor_disconnected(sensor_id) do
+    GenServer.cast(__MODULE__, {:sensor_disconnected, sensor_id})
+  end
+
   def request_mission do
     send(Process.whereis(__MODULE__), :try_critical_section)
   end
@@ -73,6 +80,7 @@ defmodule Sector.Node do
       deferred_replies: MapSet.new(),
       drones_doing_mission: %{},
       available_drones: MapSet.new(),
+      connected_sensors: MapSet.new(),
       waiting_for_drone?: false,
       request_queue: [],
       request_counter: 0,
@@ -255,6 +263,54 @@ defmodule Sector.Node do
     Logger.info("Recebido Reply de #{reply.from}")
     IO.puts("=== [SHELL] [REDE] Recebido Reply de #{reply.from} ===")
     handle_reply(reply.from, state)
+  end
+
+  @impl true
+  def handle_cast({:sensor_disconnected, sensor_id}, state) do
+    Logger.warning("Sensor #{sensor_id} desconectou!")
+    new_sensors = MapSet.delete(state.connected_sensors, sensor_id)
+    {:noreply, %{state | connected_sensors: new_sensors}}
+  end
+
+  @impl true
+  def handle_cast({:network_message, %SensorStatus{} = status}, state) do
+    Logger.info("Recebido status do sensor #{status.sensor_id}: #{status.status}")
+    new_sensors = MapSet.put(state.connected_sensors, status.sensor_id)
+    {:noreply, %{state | connected_sensors: new_sensors}}
+  end
+
+  @impl true
+  def handle_cast({:network_message, %SensorRequest{} = req}, state) do
+    Logger.info(
+      "Recebido Request do Sensor #{req.sensor_id}: #{req.reason} (Prioridade: #{req.priority})"
+    )
+
+    new_clock = state.clock + 1
+    new_counter = state.request_counter + 1
+
+    request_name = "SENSOR #{new_counter} | MOTIVO: #{req.reason} | CLOCK #{new_clock}"
+
+    request = {req.priority, request_name, new_clock, :waiting}
+
+    new_request_tree = insert_request_in_queue(state.request_queue, request)
+
+    queue_format =
+      Enum.map_join(new_request_tree, "\n", fn {p, name, ts, _status} ->
+        "#{name} PRIORIDADE #{p} TS #{ts}"
+      end)
+
+    IO.puts("\n=== [SHELL] Missão de Sensor enfileirada. FILA=\n#{queue_format} ===")
+
+    new_state = %{
+      state
+      | request_queue: new_request_tree,
+        request_counter: new_counter,
+        clock: new_clock
+    }
+
+    new_state = maybe_start_request(new_state)
+
+    {:noreply, new_state}
   end
 
   @impl true

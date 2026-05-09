@@ -176,4 +176,39 @@ defmodule Core.Protocol do
 
     def from_map(_), do: {:error, :invalid_message}
   end
+
+  defmodule SensorStatus do
+    @moduledoc "Mensagem enviada pelo sensor para registrar/informar status ao setor."
+    @derive JSON.Encoder
+    defstruct [:type, :sensor_id, :status]
+
+    def from_map(%{"type" => "sensor_status", "sensor_id" => sensor_id, "status" => status}) do
+      {:ok, %__MODULE__{type: :sensor_status, sensor_id: sensor_id, status: status}}
+    end
+
+    def from_map(_), do: {:error, :invalid_message}
+  end
+
+  defmodule SensorRequest do
+    @moduledoc "Mensagem enviada pelo sensor solicitando que o setor enfileire um pedido de missão."
+    @derive JSON.Encoder
+    defstruct [:type, :sensor_id, :priority, :reason]
+
+    def from_map(%{
+          "type" => "sensor_request",
+          "sensor_id" => sensor_id,
+          "priority" => priority,
+          "reason" => reason
+        }) do
+      {:ok,
+       %__MODULE__{
+         type: :sensor_request,
+         sensor_id: sensor_id,
+         priority: priority,
+         reason: reason
+       }}
+    end
+
+    def from_map(_), do: {:error, :invalid_message}
+  end
 end
