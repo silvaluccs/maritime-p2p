@@ -202,6 +202,15 @@ defmodule Drone.TcpClient do
          ) do
       {:ok, socket} ->
         Logger.info("Drone conectado ao nó #{peer}")
+
+        auth_msg = %Core.Protocol.Auth{
+          type: :auth,
+          id: System.get_env("DRONE_ID") || "unknown_drone",
+          passkey: Core.Auth.get_hashed_passkey()
+        }
+
+        :gen_tcp.send(socket, JSON.encode!(auth_msg) <> "\n")
+
         Map.update!(state, :sockets, &Map.put(&1, peer, socket))
 
       {:error, _reason} ->

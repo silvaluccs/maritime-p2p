@@ -119,6 +119,20 @@ defmodule Core.Protocol do
     def from_map(_), do: {:error, :invalid_message}
   end
 
+  defmodule Auth do
+    @moduledoc """
+    Mensagem de autenticação usando uma passkey criptografada (hash SHA256).
+    """
+    @derive JSON.Encoder
+    defstruct [:type, :id, :passkey]
+
+    def from_map(%{"type" => "auth", "id" => id, "passkey" => passkey}) do
+      {:ok, %__MODULE__{type: :auth, id: id, passkey: passkey}}
+    end
+
+    def from_map(_), do: {:error, :invalid_message}
+  end
+
   defmodule DroneStatus do
     @moduledoc "Mensagem enviada pelo drone para informar seu status aos setores."
     @derive JSON.Encoder

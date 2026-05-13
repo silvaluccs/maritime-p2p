@@ -168,6 +168,15 @@ defmodule Sector.TcpClient do
          ) do
       {:ok, socket} ->
         Logger.info("Conectado a #{inspect(address)}")
+
+        auth_msg = %Core.Protocol.Auth{
+          type: :auth,
+          id: address,
+          passkey: Core.Auth.get_hashed_passkey()
+        }
+
+        :gen_tcp.send(socket, JSON.encode!(auth_msg) <> "\n")
+
         Sector.Node.peer_connected(address)
 
         state

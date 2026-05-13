@@ -42,6 +42,14 @@ defmodule Sensors.Worker do
 
     case must_connect_to_host(host_to_connect) do
       {:ok, socket} ->
+        auth_msg = %Core.Protocol.Auth{
+          type: :auth,
+          id: state.sensor_id,
+          passkey: Core.Auth.get_hashed_passkey()
+        }
+
+        :gen_tcp.send(socket, JSON.encode!(auth_msg) <> "\n")
+
         status_msg = %Core.Protocol.SensorStatus{
           type: :sensor_status,
           sensor_id: state.sensor_id,

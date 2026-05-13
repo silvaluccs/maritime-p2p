@@ -10,6 +10,7 @@ services:
       - NODE_NAME=sector1
       - TCP_PORT=5050
       - HOSTS=sector2:5050,sector3:5050
+      - PASSKEY=${PASSKEY}
     command:
       [
         "sh",
@@ -30,6 +31,7 @@ services:
       - NODE_NAME=sector2
       - TCP_PORT=5050
       - HOSTS=sector1:5050,sector3:5050
+      - PASSKEY=${PASSKEY}
     command:
       [
         "sh",
@@ -52,6 +54,7 @@ services:
       - NODE_NAME=sector3
       - TCP_PORT=5050
       - HOSTS=sector1:5050,sector2:5050
+      - PASSKEY=${PASSKEY}
     command:
       [
         "sh",
@@ -72,6 +75,7 @@ services:
     environment:
       - DRONE_ID=drone_alpha
       - TCP_PEERS=sector1:5050,sector2:5050,sector3:5050
+      - PASSKEY=${PASSKEY}
     command: ["sh", "-c", "cd apps/drone && mix run --no-halt"]
     depends_on:
       - sector1
@@ -86,41 +90,45 @@ services:
     environment:
       - DRONE_ID=drone_beta
       - TCP_PEERS=sector1:5050,sector2:5050,sector3:5050
+      - PASSKEY=${PASSKEY}
     command: ["sh", "-c", "cd apps/drone && mix run --no-halt"]
     depends_on:
       - sector1
       - sector2
       - sector3
 
-  sensor1:
-    build:
-      context: .
-      dockerfile: apps/sensors/Dockerfile
-    hostname: sensor1
-    environment:
-      - HOST=sector1:5050
-    command: ["sh", "-c", "cd apps/sensors && mix run --no-halt"]
-    depends_on:
-      - sector1
+  # sensor1:
+  #   build:
+  #     context: .
+  #     dockerfile: apps/sensors/Dockerfile
+  #   hostname: sensor1
+  #   environment:
+  #     - HOST=sector1:5050
+  #     - PASSKEY=${PASSKEY}
+  #   command: ["sh", "-c", "cd apps/sensors && mix run --no-halt"]
+  #   depends_on:
+  #     - sector1
 
-  sensor2:
-    build:
-      context: .
-      dockerfile: apps/sensors/Dockerfile
-    hostname: sensor2
-    environment:
-      - HOST=sector2:5050
-    command: ["sh", "-c", "cd apps/sensors && mix run --no-halt"]
-    depends_on:
-      - sector2
+  # sensor2:
+  #   build:
+  #     context: .
+  #     dockerfile: apps/sensors/Dockerfile
+  #   hostname: sensor2
+  #   environment:
+  #     - HOST=sector2:5050
+  #     - PASSKEY=${PASSKEY}
+  #   command: ["sh", "-c", "cd apps/sensors && mix run --no-halt"]
+  #   depends_on:
+  #     - sector2
 
-  sensor3:
-    build:
-      context: .
-      dockerfile: apps/sensors/Dockerfile
-    hostname: sensor3
-    environment:
-      - HOST=sector3:5050
-    command: ["sh", "-c", "cd apps/sensors && mix run --no-halt"]
-    depends_on:
-      - sector3
+  # sensor3:
+  #   build:
+  #     context: .
+  #     dockerfile: apps/sensors/Dockerfile
+  #   hostname: sensor3
+  #   environment:
+  #     - HOST=sector3:5050
+  #     - PASSKEY=${PASSKEY}
+  #   command: ["sh", "-c", "cd apps/sensors && mix run --no-halt"]
+  #   depends_on:
+  #     - sector3

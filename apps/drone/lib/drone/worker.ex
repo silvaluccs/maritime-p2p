@@ -198,6 +198,6 @@ defmodule Drone.Worker do
   end
 
   defp random_duration_ms do
-    25_000
+    30_000
   end
 end
